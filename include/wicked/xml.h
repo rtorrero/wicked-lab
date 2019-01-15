@@ -16,8 +16,8 @@
  *	GNU General Public License for more details.
  *
  *	You should have received a copy of the GNU General Public License along
- *	with this program; if not, see <http://www.gnu.org/licenses/> or write 
- *	to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, 
+ *	with this program; if not, see <http://www.gnu.org/licenses/> or write
+ *	to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  *	Boston, MA 02110-1301 USA.
  *
  */
@@ -34,7 +34,6 @@ struct xml_document {
 	struct xml_node *	root;
 };
 
-typedef struct xml_document_array	xml_document_array_t;
 struct xml_document_array {
 	unsigned int		count;
 	xml_document_t **	data;

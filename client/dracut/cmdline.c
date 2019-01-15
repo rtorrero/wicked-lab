@@ -42,18 +42,48 @@
 #include "util_priv.h"
 
 
-void
-ni_cmdlineconfig_set(ni_cmdlineconfig_t *sc, const char *name, const char *value)
-{
-	return;
-	//TODO
-}
+/**
+ * FIXME: This static function is already defined in sysconfig.c,
+ * move it to util.c and use it from there
+ */
 
-ni_cmdlineconfig_t *
-ni_cmdlineconfig_new(const char *pathname)
+static ni_bool_t unquote(char *);
+
+ni_bool_t
+ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, const char *value)
 {
-	return NULL;
-	//TODO
+	char ifname[16];
+	char varname_buf[19];
+	char filtered_value[512];
+	size_t len;
+	ni_compat_netdev_t *compat = NULL;
+
+	if (value) {
+		strcpy(filtered_value, value);
+		unquote(filtered_value);
+	}
+
+	if (!strcmp(name, "ip")) {
+		if (value && strchr(filtered_value, ':')) {
+			len = strchr(filtered_value, ':') - filtered_value;
+			strncpy(ifname, filtered_value, len);
+			ifname[len] = 0;	// FIXME: not very safe if len is > than array size
+			snprintf(varname_buf, sizeof varname_buf, "%s.%s", name, ifname);
+			//ni_var_array_set(&sc->vars, varname_buf, strchr(filtered_value, ':') + 1); //FIXME: this adding is dangerous crap
+
+			if (!ni_netdev_name_is_valid(ifname)) {
+				ni_error("Rejecting suspect interface name: %s", ifname);
+				return FALSE;
+			}
+
+			compat = ni_compat_netdev_new(ifname);
+			compat->dev->name = ifname;
+			return TRUE;
+		}
+		// else ignore ip={dhcp|on|any|dhcp6|auto6} for now
+	}
+
+	return FALSE;
 }
 
 /*
@@ -61,7 +91,7 @@ ni_cmdlineconfig_new(const char *pathname)
  * found. Optionally, @varnames will restrict the list of variables we return.
  */
 ni_bool_t
-ni_cmdlineconfig_read(const char *filename, ni_cmdlineconfig_t *sc, const char **varnames)
+ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const char **varnames)
 {
 	char linebuf[512];
 	ni_bool_t is_open_quote = FALSE;
@@ -104,7 +134,7 @@ ni_cmdlineconfig_read(const char *filename, ni_cmdlineconfig_t *sc, const char *
 				// This is the case where we have just a variable with no parameters
 				value = NULL;
 				*sp++ = '\0';
-				ni_cmdlineconfig_set(sc, name, value);
+				ni_cmdlineconfig_add_interface(nd, name, value);
 				continue;
 			} else {
 				*sp++ = '\0';
@@ -143,7 +173,7 @@ ni_cmdlineconfig_read(const char *filename, ni_cmdlineconfig_t *sc, const char *
 				*sp++ = '\0';
 
 			is_open_quote == FALSE;
-			ni_cmdlineconfig_set(sc, name, value);
+			ni_cmdlineconfig_add_interface(nd, name, value);
 		}
 	}
 
@@ -152,7 +182,7 @@ ni_cmdlineconfig_read(const char *filename, ni_cmdlineconfig_t *sc, const char *
 }
 
 static xml_node_t *
-ni_ifconfig_generate_dhcp4_addrconf(xml_node_t *ifnode, ni_cmdlineconfig_t *clf)
+ni_ifconfig_generate_dhcp4_addrconf(xml_node_t *ifnode, ni_compat_netdev_array_t *nd)
 {
 	xml_node_t *dhcp;
 
@@ -163,8 +193,8 @@ ni_ifconfig_generate_dhcp4_addrconf(xml_node_t *ifnode, ni_cmdlineconfig_t *clf)
 
 }
 
-static ni_bool_t
-ni_ifconfig_read_dracut_interface(xml_document_array_t *array, ni_cmdlineconfig_t *clf)
+/*static ni_bool_t
+ni_ifconfig_read_dracut_interface(xml_document_array_t *array, ni_compat_netdev_array_t *nd)
 {
 	unsigned int i;
 	xml_document_t *config_doc;
@@ -187,12 +217,12 @@ ni_ifconfig_read_dracut_interface(xml_document_array_t *array, ni_cmdlineconfig_
 			xml_document_array_append(array, config_doc);
 		}
 	}
-}
+}*/
 
 static ni_bool_t
 ni_ifconfig_read_dracut_cmdline_file(xml_document_array_t *docs, const char *type,
 			const char *root, const char *pathname, ni_bool_t check_prio,
-			ni_bool_t raw, ni_cmdlineconfig_t *sc)
+			ni_bool_t raw, ni_compat_ifconfig_t *conf)
 {
 	//FIXME: Remove this
 	unsigned int i;
@@ -203,15 +233,13 @@ ni_ifconfig_read_dracut_cmdline_file(xml_document_array_t *docs, const char *typ
 		pathname = pathbuf;
 	}
 
-
-
-	return ni_cmdlineconfig_read(pathbuf, sc, NULL);
+	return ni_cmdlineconfig_read(pathbuf, &conf->netdevs, NULL);
 }
 
 static ni_bool_t
 ni_ifconfig_read_dracut_cmdline_dir(xml_document_array_t *docs, const char *type,
 			const char *root, const char *pathname, ni_bool_t check_prio,
-			ni_bool_t raw, ni_cmdlineconfig_t *sc)
+			ni_bool_t raw, ni_compat_ifconfig_t *conf)
 {
 	char pathbuf[PATH_MAX] = {'\0'};
 	ni_string_array_t files = NI_STRING_ARRAY_INIT;
@@ -227,7 +255,7 @@ ni_ifconfig_read_dracut_cmdline_dir(xml_document_array_t *docs, const char *type
 
 	if (ni_scandir(pathname, "*.conf", &files) != 0) {
 		for (i = 0; i < files.count; ++i) {
-			if (ni_ifconfig_read_dracut_cmdline_file(docs, type, pathname, files.data[i], check_prio, raw, sc))
+			if (ni_ifconfig_read_dracut_cmdline_file(docs, type, pathname, files.data[i], check_prio, raw, conf))
 				empty = FALSE;
 		}
 	}
@@ -247,8 +275,8 @@ ni_ifconfig_read_dracut_cmdline(xml_document_array_t *array, const char *type,
 	char pathbuf[PATH_MAX];
 	ni_bool_t rv = FALSE;
 	ni_string_array_t cmdline_files = NI_STRING_ARRAY_INIT;
-	ni_cmdlineconfig_t *sc;
-	sc = ni_cmdlineconfig_new("/tmp/dracut");
+	ni_compat_ifconfig_t conf;
+	ni_compat_ifconfig_init(&conf, type);
 
 	if (ni_string_empty(path)) {
 		ni_string_array_append(&cmdline_files, "/etc/cmdline");
@@ -266,12 +294,59 @@ ni_ifconfig_read_dracut_cmdline(xml_document_array_t *array, const char *type,
 		}
 
 		if (ni_isreg(pathbuf))
-			rv = ni_ifconfig_read_dracut_cmdline_file(array, type, ni_dirname(pathbuf), ni_basename(pathbuf), check_prio, raw, sc);
+			rv = ni_ifconfig_read_dracut_cmdline_file(array, type, ni_dirname(pathbuf), ni_basename(pathbuf), check_prio, raw, &conf);
 		else if (ni_isdir(pathbuf))
-			rv = ni_ifconfig_read_dracut_cmdline_dir(array, type, root, pathbuf, check_prio, raw, sc);
+			rv = ni_ifconfig_read_dracut_cmdline_dir(array, type, root, pathbuf, check_prio, raw, &conf);
 	}
 
 	if (rv)
-		ni_ifconfig_read_dracut_interface(array, sc);
+		//ni_ifconfig_read_dracut_interface(array, conf);
+		ni_compat_generate_interfaces(array, &conf, FALSE, FALSE);
 	return rv;
+}
+
+/**
+ * FIXME: This static function is already defined in sysconfig.c,
+ * move it to util.c and use it from there
+ */
+
+/* Extract values from a setting. string starts after '='
+ * Good: sym=val ; sym="val" ; sym='val'
+ * Bad:  sym="val ; sym='val
+ *
+ * returns true if val is valid.
+ */
+static ni_bool_t
+unquote(char *string)
+{
+	char quote_sign = 0;
+	char *src, *dst, cc, lc = 0;
+	ni_bool_t ret = TRUE;
+
+	if (!string)
+		return ret;
+
+	ret = TRUE;
+	src = dst = string;
+	if (*string == '"' || *string == '\'') {
+		quote_sign = *string;
+		src++;
+	}
+	do {
+		cc = *src;
+		if (!cc) {
+			ret = quote_sign && lc == quote_sign;
+			break;
+		}
+		if (isspace(cc) && !quote_sign)
+			break;
+		if (cc == quote_sign)
+			break;
+		*dst = lc = cc;
+		dst++;
+		src++;
+	} while (1);
+
+	*dst = '\0';
+	return ret;
 }

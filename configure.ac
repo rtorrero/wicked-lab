@@ -225,6 +225,8 @@ AC_DISABLE_STATIC
 AC_LANG([C])
 AC_PROG_CC
 AC_PROG_CPP
+# Use gnu89 C compiler flavor, todo: cleanup code to get rid of this
+test "X$GCC" = Xyes && CFLAGS="-std=gnu89 ${CFLAGS:+ $CFLAGS}"
 AC_PROG_AWK
 AC_PATH_PROG(INSTALL, install)
 AC_PROG_LN_S
