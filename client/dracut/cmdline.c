@@ -34,6 +34,8 @@
 #include <wicked/util.h>
 #include <wicked/logging.h>
 #include <wicked/netinfo.h>
+#include <wicked/ipv4.h>
+#include <wicked/ipv6.h>
 #include <wicked/xml.h>
 
 #include "client/dracut/cmdline.h"
@@ -55,8 +57,13 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 	char ifname[16];
 	char varname_buf[19];
 	char filtered_value[512];
+	const char delim[2] = ":";
+	char *token;
+	ni_ipv4_devinfo_t *ipv4;
+	ni_ipv6_devinfo_t *ipv6;
 	size_t len;
 	ni_compat_netdev_t *compat = NULL;
+	int value_pos = 0;
 
 	if (value) {
 		strcpy(filtered_value, value);
@@ -75,9 +82,31 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 				ni_error("Rejecting suspect interface name: %s", ifname);
 				return FALSE;
 			}
-
 			compat = ni_compat_netdev_new(ifname);
-			compat->dev->name = ifname;
+
+			ni_compat_netdev_array_append(nd, compat);
+			token = strtok(filtered_value, delim);
+			while (token != NULL) {
+				token = strtok(NULL, delim);
+				value_pos++;
+				if (token == NULL)
+					break;
+				if (!strcmp(token, "dhcp6")) {
+					compat->dhcp6.enabled = TRUE;
+					ipv6 = ni_netdev_get_ipv6(compat->dev);
+					ni_tristate_set(&ipv6->conf.enabled, TRUE);
+					/*if (ni_check_domain_name(string, ni_string_len(string), 0)) {
+						ni_string_dup(&compat->dhcp6.hostname, string);
+					}*/
+				} else if (!strcmp(token, "dhcp")) {
+					compat->dhcp4.enabled = TRUE;
+					ipv4 = ni_netdev_get_ipv4(compat->dev);
+					ni_tristate_set(&ipv4->conf.enabled, TRUE);
+					/*if (ni_check_domain_name(string, ni_string_len(string), 0)) {
+						ni_string_dup(&compat->dhcp4.hostname, string);
+					}*/
+				}
+			}
 			return TRUE;
 		}
 		// else ignore ip={dhcp|on|any|dhcp6|auto6} for now
@@ -224,8 +253,6 @@ ni_ifconfig_read_dracut_cmdline_file(xml_document_array_t *docs, const char *typ
 			const char *root, const char *pathname, ni_bool_t check_prio,
 			ni_bool_t raw, ni_compat_ifconfig_t *conf)
 {
-	//FIXME: Remove this
-	unsigned int i;
 	char pathbuf[PATH_MAX] = {'\0'};
 
 	if (!ni_string_empty(root)) {
