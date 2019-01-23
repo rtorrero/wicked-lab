@@ -281,42 +281,6 @@ done:
 	return success;
 }
 
-/*
- * Read HOSTNAME file
- */
-static const char *
-__ni_suse_read_default_hostname(const char *root, char **hostname)
-{
-	const char *filenames[] = __NI_SUSE_HOSTNAME_FILES, **name;
-	char filename[PATH_MAX];
-	char buff[256] = {'\0'};
-	FILE *input;
-
-	if (!hostname)
-		return NULL;
-	ni_string_free(hostname);
-
-	for (name = filenames; name && !ni_string_empty(*name); name++) {
-		snprintf(filename, sizeof(filename), "%s%s", root, *name);
-
-		if (!ni_isreg(filename))
-			continue;
-
-		if (!(input = ni_file_open(filename, "r", 0600)))
-			continue;
-
-		if (fgets(buff, sizeof(buff)-1, input)) {
-			buff[strcspn(buff, " \t\r\n")] = '\0';
-
-			if (ni_check_domain_name(buff, strlen(buff), 0))
-				ni_string_dup(hostname, buff);
-		}
-		fclose(input);
-		break;
-	}
-	return *hostname;
-}
-
 static ni_bool_t
 __ni_suse_read_global_ifsysctl(const char *root, const char *path)
 {
@@ -418,7 +382,7 @@ __ni_suse_read_globals(const char *root, const char *path, const char *real)
 
 	__ni_suse_free_globals();
 
-	__ni_suse_read_default_hostname(root, &__ni_suse_default_hostname);
+	ni_compat_read_default_hostname(root, &__ni_suse_default_hostname);
 
 	snprintf(pathbuf, sizeof(pathbuf), "%s/%s", real, __NI_SUSE_CONFIG_GLOBAL);
 	if (ni_file_exists(pathbuf)) {
