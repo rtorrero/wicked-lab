@@ -50,6 +50,7 @@
  */
 
 static ni_bool_t unquote(char *);
+static char * __ni_suse_default_hostname;
 
 ni_bool_t
 ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, const char *value)
@@ -63,6 +64,7 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 	ni_ipv6_devinfo_t *ipv6;
 	size_t len;
 	ni_compat_netdev_t *compat = NULL;
+
 	int value_pos = 0;
 
 	if (value) {
@@ -95,16 +97,14 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 					compat->dhcp6.enabled = TRUE;
 					ipv6 = ni_netdev_get_ipv6(compat->dev);
 					ni_tristate_set(&ipv6->conf.enabled, TRUE);
-					/*if (ni_check_domain_name(string, ni_string_len(string), 0)) {
-						ni_string_dup(&compat->dhcp6.hostname, string);
-					}*/
+					ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
+					ni_string_dup(&compat->dhcp6.hostname, __ni_suse_default_hostname);
 				} else if (!strcmp(token, "dhcp")) {
 					compat->dhcp4.enabled = TRUE;
 					ipv4 = ni_netdev_get_ipv4(compat->dev);
 					ni_tristate_set(&ipv4->conf.enabled, TRUE);
-					/*if (ni_check_domain_name(string, ni_string_len(string), 0)) {
-						ni_string_dup(&compat->dhcp4.hostname, string);
-					}*/
+					ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
+					ni_string_dup(&compat->dhcp4.hostname, __ni_suse_default_hostname);
 				}
 			}
 			return TRUE;
@@ -208,18 +208,6 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 
 	fclose(fp);
 	return TRUE;
-}
-
-static xml_node_t *
-ni_ifconfig_generate_dhcp4_addrconf(xml_node_t *ifnode, ni_compat_netdev_array_t *nd)
-{
-	xml_node_t *dhcp;
-
-	dhcp = xml_node_new("ipv4:dhcp", ifnode);
-	xml_node_new_element("enabled", dhcp, "true");
-
-	return dhcp;
-
 }
 
 /*static ni_bool_t
