@@ -47,7 +47,7 @@ extern const ni_ifconfig_type_t *	ni_ifconfig_find_map(const ni_ifconfig_type_t 
 extern const ni_ifconfig_type_t *	ni_ifconfig_find_type(const ni_ifconfig_type_t *,
 					const char *, const char *, const char *, size_t);
 extern ni_bool_t			ni_ifconfig_read_subtype(xml_document_array_t *,
-					const ni_ifconfig_type_t *,
-					const char *, const char *, ni_bool_t, ni_bool_t);
+					const ni_ifconfig_type_t *, const char *,
+					const char *, ni_bool_t, ni_bool_t, const char *);
 
 #endif /* WICKED_CLIENT_READ_CONFIG_H */

@@ -45,5 +45,5 @@ ni_bool_t
 ni_ifconfig_read_dracut(xml_document_array_t *array, const char *type,
 			const char *root, const char *path, ni_bool_t prio, ni_bool_t raw)
 {
-	return ni_ifconfig_read_subtype(array, ni_ifconfig_types_dracut, root, path, prio, raw);
+	return ni_ifconfig_read_subtype(array, ni_ifconfig_types_dracut, root, path, prio, raw, type);
 }

@@ -53,7 +53,7 @@ static ni_bool_t unquote(char *);
 static char * __ni_suse_default_hostname;
 
 ni_bool_t
-ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, const char *value)
+ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, const char *value, const char *filename)
 {
 	char ifname[16];
 	char varname_buf[19];
@@ -62,6 +62,7 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 	char *token;
 	ni_ipv4_devinfo_t *ipv4;
 	ni_ipv6_devinfo_t *ipv6;
+	ni_ifworker_control_t *control;
 	size_t len;
 	ni_compat_netdev_t *compat = NULL;
 
@@ -78,7 +79,6 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 			strncpy(ifname, filtered_value, len);
 			ifname[len] = 0;	// FIXME: not very safe if len is > than array size
 			snprintf(varname_buf, sizeof varname_buf, "%s.%s", name, ifname);
-			//ni_var_array_set(&sc->vars, varname_buf, strchr(filtered_value, ':') + 1); //FIXME: this adding is dangerous crap
 
 			if (!ni_netdev_name_is_valid(ifname)) {
 				ni_error("Rejecting suspect interface name: %s", ifname);
@@ -88,6 +88,14 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 
 			ni_compat_netdev_array_append(nd, compat);
 			token = strtok(filtered_value, delim);
+
+			control = ni_ifworker_control_new();
+			control->link_timeout = 0;
+			compat->control = control;
+			compat->firewall.enabled = TRUE;
+
+			ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
+
 			while (token != NULL) {
 				token = strtok(NULL, delim);
 				value_pos++;
@@ -96,15 +104,35 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 				if (!strcmp(token, "dhcp6")) {
 					compat->dhcp6.enabled = TRUE;
 					ipv6 = ni_netdev_get_ipv6(compat->dev);
+					ipv4 = ni_netdev_get_ipv4(compat->dev);
 					ni_tristate_set(&ipv6->conf.enabled, TRUE);
+					ni_tristate_set(&ipv4->conf.enabled, TRUE);
+					ni_tristate_set(&ipv4->conf.arp_verify, TRUE);
 					ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
 					ni_string_dup(&compat->dhcp6.hostname, __ni_suse_default_hostname);
 				} else if (!strcmp(token, "dhcp")) {
 					compat->dhcp4.enabled = TRUE;
+					ipv6 = ni_netdev_get_ipv6(compat->dev);
 					ipv4 = ni_netdev_get_ipv4(compat->dev);
+					ni_tristate_set(&ipv6->conf.enabled, TRUE);
 					ni_tristate_set(&ipv4->conf.enabled, TRUE);
+					ni_tristate_set(&ipv4->conf.arp_verify, TRUE);
+					//compat->dhcp4.update = 12893;		//FIXME: this is just a test
+					ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_HOSTNAME, TRUE);
+					ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_SMB, TRUE);
+					compat->dhcp4.defer_timeout = 15;	//FIXME: read default as compat-suse.c does
 					ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
 					ni_string_dup(&compat->dhcp4.hostname, __ni_suse_default_hostname);
+				} else if (!strcmp(token, "auto6")) {
+					compat->auto6.enabled = TRUE;
+					ipv6 = ni_netdev_get_ipv6(compat->dev);
+					ipv4 = ni_netdev_get_ipv4(compat->dev);
+					ni_tristate_set(&ipv6->conf.enabled, TRUE);
+					ni_tristate_set(&ipv4->conf.enabled, TRUE);
+					ni_tristate_set(&ipv4->conf.arp_verify, TRUE);
+					ni_addrconf_update_set(&compat->auto6.update, NI_ADDRCONF_UPDATE_DNS, TRUE);
+					compat->auto6.defer_timeout = 0;
+
 				}
 			}
 			return TRUE;
@@ -163,7 +191,7 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				// This is the case where we have just a variable with no parameters
 				value = NULL;
 				*sp++ = '\0';
-				ni_cmdlineconfig_add_interface(nd, name, value);
+				ni_cmdlineconfig_add_interface(nd, name, value, filename);
 				continue;
 			} else {
 				*sp++ = '\0';
@@ -202,39 +230,13 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				*sp++ = '\0';
 
 			is_open_quote == FALSE;
-			ni_cmdlineconfig_add_interface(nd, name, value);
+			ni_cmdlineconfig_add_interface(nd, name, value, filename);
 		}
 	}
 
 	fclose(fp);
 	return TRUE;
 }
-
-/*static ni_bool_t
-ni_ifconfig_read_dracut_interface(xml_document_array_t *array, ni_compat_netdev_array_t *nd)
-{
-	unsigned int i;
-	xml_document_t *config_doc;
-	xml_node_t *root, *ifnode, *namenode;
-	for (i=0; i < clf->vars.count; i++) {
-		if (!strncmp(clf->vars.data[i].name, "ip.", 3 )) {
-			config_doc = xml_document_new();
-			root = xml_document_root(config_doc);
-			ifnode = xml_node_new("interface", xml_document_root(config_doc));
-
-			//FIXME: Hardcoded stuff just as POC
-			namenode = xml_node_new_element("name", ifnode, strchr(clf->vars.data[i].name, '.') + 1);
-			//xml_node_add_attr(namenode, "namespace", "ethernet");
-
-			//FIXME: just a POC, use a switch.case here for all possible addrconf modes
-			if (!strncmp(clf->vars.data[i].value, "dhcp", 4)) {
-				ni_ifconfig_generate_dhcp4_addrconf(ifnode, clf);
-			}
-
-			xml_document_array_append(array, config_doc);
-		}
-	}
-}*/
 
 static ni_bool_t
 ni_ifconfig_read_dracut_cmdline_file(xml_document_array_t *docs, const char *type,
@@ -314,10 +316,10 @@ ni_ifconfig_read_dracut_cmdline(xml_document_array_t *array, const char *type,
 			rv = ni_ifconfig_read_dracut_cmdline_dir(array, type, root, pathbuf, check_prio, raw, &conf);
 	}
 
-	if (rv)
-		//ni_ifconfig_read_dracut_interface(array, conf);
+	if (rv) {
 		ni_compat_generate_interfaces(array, &conf, FALSE, FALSE);
-	return rv;
+		return rv;
+	}
 }
 
 /**

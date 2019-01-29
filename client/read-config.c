@@ -129,7 +129,8 @@ ni_ifconfig_find_type(const ni_ifconfig_type_t *map, const char *root,
 
 ni_bool_t
 ni_ifconfig_read_subtype(xml_document_array_t *array, const ni_ifconfig_type_t *type,
-			const char *root, const char *path, ni_bool_t prio, ni_bool_t raw)
+			const char *root, const char *path, ni_bool_t prio, ni_bool_t raw,
+			const char *supertype)
 {
 	const ni_ifconfig_type_t *map;
 	const char *sub_path = path;
@@ -149,7 +150,7 @@ ni_ifconfig_read_subtype(xml_document_array_t *array, const ni_ifconfig_type_t *
 
 	map = ni_ifconfig_find_type(type, root, path, sub_name, len);
 	if (map && map->name && map->ops.read) {
-		ni_string_printf(&sub_type, "%s:%s", type->name, map->name);
+		ni_string_printf(&sub_type, "%s:%s", supertype, map->name);
 		ret = map->ops.read(array, sub_type, root, sub_path, prio, raw);
 		ni_string_free(&sub_type);
 	} else {
@@ -527,7 +528,7 @@ ni_bool_t
 ni_ifconfig_read_wicked(xml_document_array_t *array, const char *type,
 			const char *root, const char *path, ni_bool_t prio, ni_bool_t raw)
 {
-	return ni_ifconfig_read_subtype(array, ni_ifconfig_types_wicked, root, path, prio, raw);
+	return ni_ifconfig_read_subtype(array, ni_ifconfig_types_wicked, root, path, prio, raw, type);
 }
 
 /*
@@ -574,7 +575,7 @@ ni_bool_t
 ni_ifconfig_read_compat(xml_document_array_t *array, const char *type,
 			const char *root, const char *path, ni_bool_t check_prio, ni_bool_t raw)
 {
-	return ni_ifconfig_read_subtype(array, ni_ifconfig_types_compat, root, path, check_prio, raw);
+	return ni_ifconfig_read_subtype(array, ni_ifconfig_types_compat, root, path, check_prio, raw, type);
 }
 
 ni_bool_t
