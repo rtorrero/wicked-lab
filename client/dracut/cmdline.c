@@ -52,6 +52,113 @@
 static ni_bool_t unquote(char *);
 static char * __ni_suse_default_hostname;
 
+
+void
+ni_cmdlineconfig_initialize_compat_netdev_array(ni_compat_netdev_array_t *nd, const char *ifname, const char *filename)
+{
+	ni_ipv4_devinfo_t *ipv4;
+	ni_ipv6_devinfo_t *ipv6;
+	ni_ifworker_control_t *control;
+	ni_compat_netdev_t *compat = NULL;
+
+	// FIXME: for now, we dont care about ifname not being there
+	if (!ni_netdev_name_is_valid(ifname)) {
+		ni_error("Rejecting suspect interface name: %s", ifname);
+		return FALSE;
+	}
+}
+
+ni_bool_t
+ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value)
+{
+	size_t len;
+	const char delim[2] = ":";
+	char *token;
+	ni_sockaddr_t addr;
+	unsigned int prefixlen = ~0U;
+
+	if (!value || !(token = strtok(value, delim))) {
+		return FALSE;
+	}
+
+	if (!ni_sockaddr_prefix_parse(token, &addr, &prefixlen)) {
+
+		printf("This doesn't look like an IP\n");
+	} else {
+		// ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|ibft}
+		printf("This DOES look like an ip :-)\n");
+	}
+
+	return TRUE;
+}
+
+ni_bool_t
+ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, const char *value)
+{
+	//FIXME: Implement this
+	return TRUE;
+}
+ni_bool_t
+ni_cmdlineconfig_parse_team(ni_compat_netdev_array_t *nd, const char *value)
+{
+	//FIXME: Implement this
+	return TRUE;
+}
+
+ni_bool_t
+ni_cmdlineconfig_parse_bond(ni_compat_netdev_array_t *nd, const char *value)
+{
+	//FIXME: Implement this
+	return TRUE;
+}
+
+ni_bool_t
+ni_cmdlineconfig_parse_bridge(ni_compat_netdev_array_t *nd, const char *value)
+{
+	//FIXME: Implement this
+	return TRUE;
+}
+
+/** TODO:
+ * cleanup function with similar functionality to ni_cmdlineconfig_add_interface
+ */
+ni_bool_t
+ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *name, const char *value, const char *filename)
+{
+	if (name == NULL)
+		return FALSE;
+
+	if (!strcmp(name, "ip")) {
+		ni_cmdlineconfig_parse_ip(nd, value);
+	} else if (!strcmp(name, "root")) {
+		return TRUE;
+	} else if (!strcmp(name, "ifname")) {
+		return TRUE;
+	} else if (!strcmp(name, "rd.route")) {
+		return TRUE;
+	} else if (!strcmp(name, "bootdev")) {
+		return TRUE;
+	} else if (!strcmp(name, "BOOTIF")) {
+		return TRUE;
+	} else if (!strcmp(name, "rd.bootif")) {
+		return TRUE;
+	} else if (!strcmp(name, "nameserver")) {
+		return TRUE;
+	} else if (!strcmp(name, "rd.peerdns")) {
+		return TRUE;
+	} else if (!strcmp(name, "vlan")) {
+		ni_cmdlineconfig_parse_vlan(nd, value);
+	} else if (!strcmp(name, "bond")) {
+		ni_cmdlineconfig_parse_bond(nd, value);
+	} else if (!strcmp(name, "team")) {
+		ni_cmdlineconfig_parse_team(nd, value);
+	} else if (!strcmp(name, "bridge")) {
+		ni_cmdlineconfig_parse_bridge(nd, value);
+	}
+
+	return TRUE;
+}
+
 /**
  * This function adds an interface to the ni_compat_netdev_array
  * structure. It should also check only for supported configuration values
@@ -197,7 +304,7 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				// This is the case where we have just a variable with no parameters
 				value = NULL;
 				*sp++ = '\0';
-				ni_cmdlineconfig_add_interface(nd, name, value, filename);
+				ni_cmdlineconfig_parse_cmdline_var(nd, name, value, filename);
 				continue;
 			} else {
 				*sp++ = '\0';
@@ -236,7 +343,7 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				*sp++ = '\0';
 
 			is_open_quote == FALSE;
-			ni_cmdlineconfig_add_interface(nd, name, value, filename);
+			ni_cmdlineconfig_parse_cmdline_var(nd, name, value, filename);
 		}
 	}
 
