@@ -52,6 +52,11 @@
 static ni_bool_t unquote(char *);
 static char * __ni_suse_default_hostname;
 
+/**
+ * This function adds an interface to the ni_compat_netdev_array
+ * structure. It should also check only for supported configuration values
+ * Maybe should be renamed to ni_cmdlineconfig_parse_value or something?
+ */
 ni_bool_t
 ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, const char *value, const char *filename)
 {
@@ -73,6 +78,7 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 		unquote(filtered_value);
 	}
 
+	//FIXME: This should be parsed using strtok
 	if (!strcmp(name, "ip")) {
 		if (value && strchr(filtered_value, ':')) {
 			len = strchr(filtered_value, ':') - filtered_value;
@@ -117,7 +123,6 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 					ni_tristate_set(&ipv6->conf.enabled, TRUE);
 					ni_tristate_set(&ipv4->conf.enabled, TRUE);
 					ni_tristate_set(&ipv4->conf.arp_verify, TRUE);
-					//compat->dhcp4.update = 12893;		//FIXME: this is just a test
 					ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_HOSTNAME, TRUE);
 					ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_SMB, TRUE);
 					compat->dhcp4.defer_timeout = 15;	//FIXME: read default as compat-suse.c does
@@ -144,8 +149,9 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 }
 
 /*
- * Read a dracut file, and return an object containing all variables
- * found. Optionally, @varnames will restrict the list of variables we return.
+ * Read a dracut file iterating through lines. When a variable in the form of
+ * name=value or name, we call ni_cmdlineconfig_add_interface to process the
+ * interface configuration details
  */
 ni_bool_t
 ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const char **varnames)
@@ -238,6 +244,10 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 	return TRUE;
 }
 
+/**
+ * This function takes the path to a file and reads all the configuration variables
+ * in it using ni_cmdlineconfig_read
+ */
 static ni_bool_t
 ni_ifconfig_read_dracut_cmdline_file(xml_document_array_t *docs, const char *type,
 			const char *root, const char *pathname, ni_bool_t check_prio,
@@ -253,6 +263,10 @@ ni_ifconfig_read_dracut_cmdline_file(xml_document_array_t *docs, const char *typ
 	return ni_cmdlineconfig_read(pathbuf, &conf->netdevs, NULL);
 }
 
+/**
+ * This function takes a directory in pathname and scans it for .conf files.
+ * Then it uses ni_ifconfig_read_dracut_cmdline_file to read all .conf files
+ */
 static ni_bool_t
 ni_ifconfig_read_dracut_cmdline_dir(xml_document_array_t *docs, const char *type,
 			const char *root, const char *pathname, ni_bool_t check_prio,
