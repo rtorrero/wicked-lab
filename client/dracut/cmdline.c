@@ -77,16 +77,23 @@ ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value)
 	ni_sockaddr_t addr;
 	unsigned int prefixlen = ~0U;
 
+	//FIXME: I should probably use strtok on o copy, as it is a
+	//destructive function
 	if (!value || !(token = strtok(value, delim))) {
 		return FALSE;
 	}
 
 	if (!ni_sockaddr_prefix_parse(token, &addr, &prefixlen)) {
-
-		printf("This doesn't look like an IP\n");
+		token = strtok(NULL, delim);
+		if (!token) {
+			printf("This is the ip=dhcp case\n");
+		} else {
+			printf("This is the ip=<interface>:... case\n");
+		}
 	} else {
+		// (two cases actually here, the one with DNS at the end and the one with MTU and macaddr)
 		// ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|ibft}
-		printf("This DOES look like an ip :-)\n");
+		printf("This the ip=<client_IP>... case\n");
 	}
 
 	return TRUE;
@@ -273,6 +280,7 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 		return FALSE;
 	}
 
+	//FIXME: Use ni_stringbuf_t buff instead of the linebuff from above. Example in __ni_suse_read_routes()
 	while (fgets(linebuf, sizeof(linebuf), fp) != NULL) {
 		char *name, *value;
 		char *sp = linebuf;
