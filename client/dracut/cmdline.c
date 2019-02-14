@@ -53,8 +53,8 @@ static ni_bool_t unquote(char *);
 static char * __ni_suse_default_hostname;
 
 
-void
-ni_cmdlineconfig_initialize_compat_netdev_array(ni_compat_netdev_array_t *nd, const char *ifname, const char *filename)
+ni_compat_netdev_t *
+ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, const char *ifname, const char *filename)
 {
 	ni_ipv4_devinfo_t *ipv4;
 	ni_ipv6_devinfo_t *ipv6;
@@ -64,36 +64,73 @@ ni_cmdlineconfig_initialize_compat_netdev_array(ni_compat_netdev_array_t *nd, co
 	// FIXME: for now, we dont care about ifname not being there
 	if (!ni_netdev_name_is_valid(ifname)) {
 		ni_error("Rejecting suspect interface name: %s", ifname);
-		return FALSE;
+		return NULL;
 	}
+
+
+	if (ifname != NULL && (compat = ni_compat_netdev_by_name(nd, ifname))) {
+		ni_error("Duplicated ip= parameters for the same device!");
+		return NULL;
+	};
+
+	compat = ni_compat_netdev_new(ifname);
+
+	ni_compat_netdev_new(ifname);
+	ni_compat_netdev_array_append(nd, compat);
+
+	control = ni_ifworker_control_new();
+	control->link_timeout = 0;
+	compat->control = control;
+	compat->firewall.enabled = TRUE;	// FIXME: Does this make sense?
+
+	ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
+
+	return compat;
 }
 
 ni_bool_t
-ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value)
+ni_cmdlineconfig_compat_add_dhcp
+
+ni_bool_t
+ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value, const char *filename)
 {
 	size_t len;
 	const char delim[2] = ":";
-	char *token;
+	char *words[7];
+	char *token, *previous_token, *ifname, *client_ip, *peer, *gateway_ip, *netmask, *client_hostname, *conf_method;
+	char remaining_params[512];
+	ni_compat_netdev_t *compat;
 	ni_sockaddr_t addr;
 	unsigned int prefixlen = ~0U;
 
-	//FIXME: I should probably use strtok on o copy, as it is a
-	//destructive function
-	if (!value || !(token = strtok(value, delim))) {
+	if (!value || !(token = strchr(value, ':'))) {
+		return FALSE;
+	} else {
+		strcpy(remaining_params, value);
+		token = strtok(remaining_params, delim);
+	}
+
+	if (!token) {
 		return FALSE;
 	}
 
 	if (!ni_sockaddr_prefix_parse(token, &addr, &prefixlen)) {
+		previous_token = token;
 		token = strtok(NULL, delim);
 		if (!token) {
-			printf("This is the ip=dhcp case\n");
+			//This is the ip=dhcp case
+			compat = ni_cmdlineconfig_append_compat_netdev(nd, NULL, filename);
 		} else {
-			printf("This is the ip=<interface>:... case\n");
+			//This is the ip=<interface>:... case
+			compat = ni_cmdlineconfig_append_compat_netdev(nd, previous_token, filename);
 		}
 	} else {
-		// (two cases actually here, the one with DNS at the end and the one with MTU and macaddr)
+		// (two cases actually here, the one with DNS at the end and the one with MTU and macaddr, just one for now)
 		// ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|ibft}
+		compat = ni_cmdlineconfig_append_compat_netdev
 		printf("This the ip=<client_IP>... case\n");
+	} else {
+		strtok() // FIXME
 	}
 
 	return TRUE;
@@ -136,7 +173,7 @@ ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *nam
 		return FALSE;
 
 	if (!strcmp(name, "ip")) {
-		ni_cmdlineconfig_parse_ip(nd, value);
+		ni_cmdlineconfig_parse_ip(nd, value, filename);
 	} else if (!strcmp(name, "root")) {
 		return TRUE;
 	} else if (!strcmp(name, "ifname")) {
