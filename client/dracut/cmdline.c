@@ -67,7 +67,6 @@ ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, const char *
 		return NULL;
 	}
 
-
 	if (ifname != NULL && (compat = ni_compat_netdev_by_name(nd, ifname))) {
 		ni_error("Duplicated ip= parameters for the same device!");
 		return NULL;
@@ -87,9 +86,6 @@ ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, const char *
 
 	return compat;
 }
-
-ni_bool_t
-ni_cmdlineconfig_compat_add_dhcp
 
 ni_bool_t
 ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value, const char *filename)
@@ -127,10 +123,8 @@ ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value, const
 	} else {
 		// (two cases actually here, the one with DNS at the end and the one with MTU and macaddr, just one for now)
 		// ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|ibft}
-		compat = ni_cmdlineconfig_append_compat_netdev
+		//compat = ni_cmdlineconfig_append_compat_netdev(nd, )
 		printf("This the ip=<client_IP>... case\n");
-	} else {
-		strtok() // FIXME
 	}
 
 	return TRUE;
@@ -299,6 +293,24 @@ ni_cmdlineconfig_add_interface(ni_compat_netdev_array_t *nd, const char *name, c
 	return FALSE;
 }
 
+int
+ni_cmdlineconfig_append_words(const char *line, ni_string_array_t *words)
+{
+	char tokenized[512];	//FIXME: change this to dynamic strings
+	char *wp;
+
+	strcpy(tokenized, line);
+
+	wp = strtok(tokenized, ":");
+
+	while (wp != NULL) {
+		ni_string_array_append(words, wp);
+		wp = strtok(NULL, ":");
+	}
+
+	return words->count;
+}
+
 /*
  * Read a dracut file iterating through lines. When a variable in the form of
  * name=value or name, we call ni_cmdlineconfig_add_interface to process the
@@ -309,6 +321,7 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 {
 	char linebuf[512];
 	ni_bool_t is_open_quote = FALSE;
+	ni_string_array_t param_words = NI_STRING_ARRAY_INIT;
 	FILE *fp;
 
 	ni_debug_readwrite("ni_cmdlineconfig_read(%s)", filename);
@@ -350,6 +363,9 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				value = NULL;
 				*sp++ = '\0';
 				ni_cmdlineconfig_parse_cmdline_var(nd, name, value, filename);
+				ni_cmdlineconfig_append_words(value, &param_words);
+				ni_string_array_destroy(&param_words);
+
 				continue;
 			} else {
 				*sp++ = '\0';
@@ -387,8 +403,10 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 			if (*sp != '\0')	//FIXME why ?
 				*sp++ = '\0';
 
-			is_open_quote == FALSE;
+			is_open_quote = FALSE;
 			ni_cmdlineconfig_parse_cmdline_var(nd, name, value, filename);
+			ni_cmdlineconfig_append_words(value, &param_words);
+			ni_string_array_destroy(&param_words);
 		}
 	}
 
