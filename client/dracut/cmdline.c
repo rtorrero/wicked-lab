@@ -62,7 +62,7 @@ ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, const char *
 	ni_compat_netdev_t *compat = NULL;
 
 	// FIXME: for now, we dont care about ifname not being there
-	if (!ni_netdev_name_is_valid(ifname)) {
+	if (ifname && !ni_netdev_name_is_valid(ifname)) {
 		ni_error("Rejecting suspect interface name: %s", ifname);
 		return NULL;
 	}
@@ -83,75 +83,128 @@ ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, const char *
 	compat->firewall.enabled = TRUE;	// FIXME: Does this make sense?
 
 	ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
-
 	return compat;
 }
 
 ni_bool_t
-ni_cmdlineconfig_parse_ip(ni_compat_netdev_array_t *nd, const char *value, const char *filename)
+ni_cmdlineconfig_parse_opt_ip_method(ni_compat_netdev_t *compat, const char *method){
+	ni_bool_t rv = FALSE;
+	ni_ipv4_devinfo_t *ipv4;
+	ni_ipv6_devinfo_t *ipv6;
+
+	if (!strcmp(method, "dhcp")) {
+		ipv4 = ni_netdev_get_ipv4(compat->dev);
+		ni_tristate_set(&ipv4->conf, TRUE);
+		ni_tristate_set(&ipv4->conf.arp_verify, TRUE);
+
+		compat->dhcp4.enabled = TRUE;
+		ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_HOSTNAME, TRUE);
+		ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_SMB, TRUE);
+
+		//FIXME: read default as compat-suse.c does
+		compat->dhcp4.defer_timeout = 15;
+
+		ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
+		ni_string_dup(&compat->dhcp4.hostname, __ni_suse_default_hostname);
+		rv = TRUE;
+
+	} else if (!strcmp(method, "dhcp6")) {
+		ipv6 = ni_netdev_get_ipv6(compat->dev);
+		ni_tristate_set(&ipv6->conf, TRUE);
+
+		compat->dhcp6.enabled = TRUE;
+		ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
+		rv = TRUE;
+
+	} else if (!strcmp(method, "auto6")) {
+		ipv6 = ni_netdev_get_ipv6(compat->dev);
+		ni_tristate_set(&ipv6->conf, TRUE);
+
+		compat->auto6.enabled = TRUE;
+
+	} else if (!strcmp(method, "either6")) {
+		ipv6 = ni_netdev_get_ipv6(compat->dev);
+		ni_tristate_set(&ipv6->conf, TRUE);
+
+		// FIXME: If auto fails, and only then, use dhcp6
+		compat->auto6.enabled = TRUE;
+		compat->dhcp6.enabled = TRUE;
+
+	} else if (!strcmp(method, "on")) {
+		ni_error("Ummh...:/");
+
+	} else if (!strcmp(method, "any")) {
+		ni_error("Ummmmmh...:/");
+	}
+
+	return rv;
+}
+
+ni_bool_t
+ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_array_t *nd, ni_string_array_t *params, const char *filename)
 {
 	size_t len;
-	const char delim[2] = ":";
-	char *words[7];
-	char *token, *previous_token, *ifname, *client_ip, *peer, *gateway_ip, *netmask, *client_hostname, *conf_method;
-	char remaining_params[512];
 	ni_compat_netdev_t *compat;
 	ni_sockaddr_t addr;
+	ni_address_t *ap;
 	unsigned int prefixlen = ~0U;
+	// FIXME: Duplicating the ipv4 ipv6 stuff here is not cool
+	ni_ipv4_devinfo_t *ipv4;
+	ni_ipv6_devinfo_t *ipv6;
 
-	if (!value || !(token = strchr(value, ':'))) {
+	if (!params)
 		return FALSE;
-	} else {
-		strcpy(remaining_params, value);
-		token = strtok(remaining_params, delim);
-	}
 
-	if (!token) {
-		return FALSE;
-	}
-
-	if (!ni_sockaddr_prefix_parse(token, &addr, &prefixlen)) {
-		previous_token = token;
-		token = strtok(NULL, delim);
-		if (!token) {
-			//This is the ip=dhcp case
+	if (!ni_sockaddr_prefix_parse(params->data[0], &addr, &prefixlen)) {
+		if (params->count < 2) {
+			// This is the ip=<conf-method> syntax
 			compat = ni_cmdlineconfig_append_compat_netdev(nd, NULL, filename);
+			ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[0]);
 		} else {
 			//This is the ip=<interface>:... case
-			compat = ni_cmdlineconfig_append_compat_netdev(nd, previous_token, filename);
+			compat = ni_cmdlineconfig_append_compat_netdev(nd, params->data[0], filename);
+			ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[1]);
 		}
 	} else {
 		// (two cases actually here, the one with DNS at the end and the one with MTU and macaddr, just one for now)
 		// ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|ibft}
-		//compat = ni_cmdlineconfig_append_compat_netdev(nd, )
-		printf("This the ip=<client_IP>... case\n");
+		compat = ni_cmdlineconfig_append_compat_netdev(nd, NULL, filename);
+		if (addr.ss_family == AF_INET) {
+			ipv4 = ni_netdev_get_ipv4(compat->dev);
+			ni_tristate_set(&ipv4->conf, TRUE);
+			ni_tristate_set(&ipv4->conf.arp_verify, TRUE);
+		} else if (addr.ss_family == AF_INET6) {
+			ipv6 = ni_netdev_get_ipv6(compat->dev);
+			ni_tristate_set(&ipv6->conf, TRUE);
+		}
+		ni_address_new(addr.ss_family, prefixlen, &addr, &compat->dev->addrs);
 	}
 
 	return TRUE;
 }
 
 ni_bool_t
-ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, const char *value)
+ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
 {
 	//FIXME: Implement this
 	return TRUE;
 }
 ni_bool_t
-ni_cmdlineconfig_parse_team(ni_compat_netdev_array_t *nd, const char *value)
-{
-	//FIXME: Implement this
-	return TRUE;
-}
-
-ni_bool_t
-ni_cmdlineconfig_parse_bond(ni_compat_netdev_array_t *nd, const char *value)
+ni_cmdlineconfig_parse_team(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
 {
 	//FIXME: Implement this
 	return TRUE;
 }
 
 ni_bool_t
-ni_cmdlineconfig_parse_bridge(ni_compat_netdev_array_t *nd, const char *value)
+ni_cmdlineconfig_parse_bond(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
+{
+	//FIXME: Implement this
+	return TRUE;
+}
+
+ni_bool_t
+ni_cmdlineconfig_parse_bridge(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
 {
 	//FIXME: Implement this
 	return TRUE;
@@ -161,13 +214,13 @@ ni_cmdlineconfig_parse_bridge(ni_compat_netdev_array_t *nd, const char *value)
  * cleanup function with similar functionality to ni_cmdlineconfig_add_interface
  */
 ni_bool_t
-ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *name, const char *value, const char *filename)
+ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *name, ni_string_array_t *params, const char *filename)
 {
 	if (name == NULL)
 		return FALSE;
 
 	if (!strcmp(name, "ip")) {
-		ni_cmdlineconfig_parse_ip(nd, value, filename);
+		ni_cmdlineconfig_parse_opt_ip(nd, params, filename);
 	} else if (!strcmp(name, "root")) {
 		return TRUE;
 	} else if (!strcmp(name, "ifname")) {
@@ -185,13 +238,13 @@ ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *nam
 	} else if (!strcmp(name, "rd.peerdns")) {
 		return TRUE;
 	} else if (!strcmp(name, "vlan")) {
-		ni_cmdlineconfig_parse_vlan(nd, value);
+		ni_cmdlineconfig_parse_vlan(nd, params);
 	} else if (!strcmp(name, "bond")) {
-		ni_cmdlineconfig_parse_bond(nd, value);
+		ni_cmdlineconfig_parse_bond(nd, params);
 	} else if (!strcmp(name, "team")) {
-		ni_cmdlineconfig_parse_team(nd, value);
+		ni_cmdlineconfig_parse_team(nd, params);
 	} else if (!strcmp(name, "bridge")) {
-		ni_cmdlineconfig_parse_bridge(nd, value);
+		ni_cmdlineconfig_parse_bridge(nd, params);
 	}
 
 	return TRUE;
@@ -362,8 +415,8 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				// This is the case where we have just a variable with no parameters
 				value = NULL;
 				*sp++ = '\0';
-				ni_cmdlineconfig_parse_cmdline_var(nd, name, value, filename);
 				ni_cmdlineconfig_append_words(value, &param_words);
+				ni_cmdlineconfig_parse_cmdline_var(nd, name, &param_words, filename);
 				ni_string_array_destroy(&param_words);
 
 				continue;
@@ -404,8 +457,8 @@ ni_cmdlineconfig_read(const char *filename, ni_compat_netdev_array_t *nd, const 
 				*sp++ = '\0';
 
 			is_open_quote = FALSE;
-			ni_cmdlineconfig_parse_cmdline_var(nd, name, value, filename);
 			ni_cmdlineconfig_append_words(value, &param_words);
+			ni_cmdlineconfig_parse_cmdline_var(nd, name, &param_words, filename);
 			ni_string_array_destroy(&param_words);
 		}
 	}
