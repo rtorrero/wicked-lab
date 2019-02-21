@@ -186,8 +186,61 @@ ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_array_t *nd, ni_string_array_t *p
 ni_bool_t
 ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
 {
-	//FIXME: Implement this
+	ni_vlan_t *vlan;
+	const char *ifname;
+	const char *etherdev;
+	const char *vlantag;
+	ni_compat_netdev_t *compat;
+	unsigned int tag = 0;
+	size_t len;
+
+	if (params->count != 2) {
+		ni_error("Wrong number of params for vlan specification!");
+		goto error;
+	}
+
+	ifname = params->data[0];
+	etherdev = params->data[1];
+
+	if (ifname && !ni_netdev_name_is_valid(ifname)) {
+		ni_error("Rejecting suspect interface name: %s", ifname);
+		goto error;
+	}
+
+	compat = ni_compat_netdev_new(ifname);
+	compat->dev->link.type = NI_IFTYPE_VLAN;
+	vlan = ni_netdev_get_vlan(compat->dev);
+
+	if (!strcmp(compat->dev->name, etherdev)) {
+		ni_error("ifcfg-%s: ETHERDEVICE=\"%s\" self-reference",
+			compat->dev->name, etherdev);
+		goto error;
+	}
+
+	if ((vlantag = strrchr(compat->dev->name, '.')) != NULL) {
+		/* name.<TAG> */
+		++vlantag;
+	} else {
+		/* name<TAG> */
+		len = strlen(compat->dev->name);
+		vlantag = &compat->dev->name[len];
+		while(len > 0 && isdigit((unsigned char)vlantag[-1]))
+			vlantag--;
+	}
+	if (ni_parse_uint(vlantag, &tag, 10) < 0) {
+		ni_error("ifcfg-%s: Cannot parse vlan-tag from interface name",
+			compat->dev->name);
+		goto error;
+	}
+
+	ni_compat_netdev_array_append(nd, compat);
 	return TRUE;
+error:
+	//FIXME: Check throughout cmdline.c if we need this somewhere else (HINT: YES WE DO)
+	if (compat)
+		ni_compat_netdev_free(compat);
+
+	return FALSE;
 }
 ni_bool_t
 ni_cmdlineconfig_parse_team(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
