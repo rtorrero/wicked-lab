@@ -37,6 +37,7 @@
 #include <wicked/ipv4.h>
 #include <wicked/ipv6.h>
 #include <wicked/xml.h>
+#include <wicked/vlan.h>
 
 #include "client/dracut/cmdline.h"
 #include "client/wicked-client.h"
@@ -238,11 +239,14 @@ ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *par
 		while(len > 0 && isdigit((unsigned char)vlantag[-1]))
 			vlantag--;
 	}
+
 	if (ni_parse_uint(vlantag, &tag, 10) < 0) {
 		ni_error("ifcfg-%s: Cannot parse vlan-tag from interface name",
 			compat->dev->name);
 		goto error;
 	}
+	vlan->protocol = NI_VLAN_PROTOCOL_8021Q;
+	vlan->tag = tag;
 
 	ni_compat_netdev_array_append(nd, compat);
 
