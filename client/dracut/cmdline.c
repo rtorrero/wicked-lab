@@ -63,7 +63,7 @@ ni_cmdlineconfig_new_compat_netdev(const char *ifname, const char *filename)
 		return NULL;
 	}
 
-	compat = ni_compat_netdev_new(ifname);
+	compat = ni_compat_netdev_new(NULL);
 	ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
 
 	return compat;
@@ -109,7 +109,7 @@ ni_cmdlineconfig_parse_opt_ip_method(ni_compat_netdev_t *compat, const char *met
 		ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_HOSTNAME, TRUE);
 		ni_addrconf_update_set(&compat->dhcp4.update, NI_ADDRCONF_UPDATE_SMB, TRUE);
 
-		//FIXME: read default as compat-suse.c does
+		//FIXME: read default as compat-suse.c does?
 		compat->dhcp4.defer_timeout = 15;
 
 		ni_compat_read_default_hostname("", &__ni_suse_default_hostname);
@@ -148,9 +148,12 @@ ni_cmdlineconfig_parse_opt_ip_method(ni_compat_netdev_t *compat, const char *met
 	return rv;
 }
 
-ni_bool_t
+/** Here we return an int so that we let the caller know what type of ip= format
+ * was used and interface name can be set appropiately*/
+int
 ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_t *compat, ni_string_array_t *params, const char *filename)
 {
+	int rv = NI_CMDLINE_SYNTAX_INVALID;
 	size_t len;
 	ni_sockaddr_t addr;
 	ni_address_t *ap;
@@ -165,15 +168,25 @@ ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_t *compat, ni_string_array_t *par
 	if (!ni_sockaddr_prefix_parse(params->data[0], &addr, &prefixlen)) {
 		if (params->count < 2) {
 			// This is the ip=<conf-method> syntax
-			compat = ni_cmdlineconfig_new_compat_netdev(params->data[0], filename);
+			//compat = ni_cmdlineconfig_new_compat_netdev(params->data[0], filename);
 
+			//if (!ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[0]))
+			//	ni_compat_netdev_free(compat);
+			//compat->dev->
 			if (!ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[0]))
-				ni_compat_netdev_free(compat);
+				rv = NI_CMDLINE_SYNTAX_INVALID;
+			else
+				rv = NI_CMDLINE_SYNTAX_SIMPLE;
+
 		} else {
 			//This is the ip=<interface>:... case
-			return ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[1]);
+			if (!ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[1]))
+				return NI_CMDLINE_SYNTAX_INVALID;
+			else
+				return NI_CMDLINE_SYNTAX_SIMPLE_IFNAME;
 		}
 	} else {
+		// FIXME: Finish this syntax implementation and check
 		// (two cases actually here, the one with DNS at the end and the one with MTU and macaddr, just one for now)
 		// ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|ibft}
 		if (addr.ss_family == AF_INET) {
@@ -185,9 +198,10 @@ ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_t *compat, ni_string_array_t *par
 			ni_tristate_set(&ipv6->conf, TRUE);
 		}
 		ni_address_new(addr.ss_family, prefixlen, &addr, &compat->dev->addrs);
+		rv = NI_CMDLINE_SYNTAX_EXPLICIT_DNS;
 	}
 
-	return TRUE;
+	return rv;
 }
 
 ni_bool_t
@@ -248,19 +262,27 @@ ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *par
 	vlan->protocol = NI_VLAN_PROTOCOL_8021Q;
 	vlan->tag = tag;
 
-	ni_compat_netdev_array_append(nd, compat);
+	ipv4 = ni_netdev_get_ipv4(compat->dev);
+	ni_tristate_set(&ipv4->conf, FALSE);
+	ni_tristate_set(&ipv4->conf.arp_verify, FALSE);
 
 	//Crap, remove
 	control = ni_ifworker_control_new();
 	control->link_timeout = 0;
 	compat->control = control;
 	compat->firewall.enabled = TRUE;	// FIXME: Does this make sense?
+
+	// Add the name
+	compat->dev->name = xstrdup(ifname);
+
+	ni_compat_netdev_array_append(nd, compat);
+
 	//ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
 
 	return TRUE;
 error:
 	//FIXME: Check throughout cmdline.c if we need this somewhere else (HINT: YES WE DO)
-	if (compat)
+	if (compat)	// the check is probably done inside this anyway
 		ni_compat_netdev_free(compat);
 
 	return FALSE;
@@ -321,9 +343,11 @@ ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *nam
 	} else if (!strcmp(name, "rd.peerdns")) {
 		return TRUE;
 	} else if (!strcmp(name, "vlan")) {
-		compat = ni_compat_netdev_new(params->data[0]);
+		//compat = ni_compat_netdev_new(params->data[0]);
+		compat = ni_cmdlineconfig_new_compat_netdev(params->data[0], filename);
+		if (!compat || !ni_cmdlineconfig_parse_vlan(nd, params))
+			goto cleanup;
 
-		ni_cmdlineconfig_parse_vlan(nd, params);
 	} else if (!strcmp(name, "bond")) {
 		ni_cmdlineconfig_parse_bond(nd, params);
 	} else if (!strcmp(name, "team")) {
