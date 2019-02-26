@@ -54,14 +54,9 @@ static ni_bool_t unquote(char *);
 static char * __ni_suse_default_hostname;
 
 ni_compat_netdev_t *
-ni_cmdlineconfig_new_compat_netdev(const char *ifname, const char *filename)
+ni_cmdlineconfig_new_compat_netdev(const char *filename)
 {
 	ni_compat_netdev_t *compat = NULL;
-
-	if (ifname && !ni_netdev_name_is_valid(ifname)) {
-		ni_error("Rejecting suspect interface name: %s", ifname);
-		return NULL;
-	}
 
 	compat = ni_compat_netdev_new(NULL);
 	ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
@@ -70,13 +65,16 @@ ni_cmdlineconfig_new_compat_netdev(const char *ifname, const char *filename)
 }
 
 ni_bool_t
-ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, ni_compat_netdev_t *compat, const char *ifname)
+ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, ni_compat_netdev_t *compat)
 {
-	ni_ipv4_devinfo_t *ipv4;
-	ni_ipv6_devinfo_t *ipv6;
-	ni_ifworker_control_t *control;
+	//ni_ifworker_control_t *control;
 
-	if (ifname != NULL && (ni_compat_netdev_by_name(nd, ifname))) {
+	/**
+	 *  Check if the interface has already been added.
+	 *  FIXME: we need to be able to append certain properties
+	 *  to existing devices
+	 */
+	if (compat->dev->name != NULL && (ni_compat_netdev_by_name(nd, compat->dev->name))) {
 		ni_error("Duplicated ip= parameters for the same device!");
 		return FALSE;
 	};
@@ -84,9 +82,9 @@ ni_cmdlineconfig_append_compat_netdev(ni_compat_netdev_array_t *nd, ni_compat_ne
 	ni_compat_netdev_array_append(nd, compat);
 
 	//FIXME: I don't think we need this
-	control = ni_ifworker_control_new();
-	control->link_timeout = 0;
-	compat->control = control;
+	//control = ni_ifworker_control_new();
+	//control->link_timeout = 0;
+	//compat->control = control;
 
 	// FIXME: Does this make sense?
 	compat->firewall.enabled = TRUE;
@@ -161,6 +159,7 @@ ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_t *compat, ni_string_array_t *par
 	// FIXME: Duplicating the ipv4 ipv6 stuff here is not cool
 	ni_ipv4_devinfo_t *ipv4;
 	ni_ipv6_devinfo_t *ipv6;
+	const char *ifname = NULL;
 
 	if (!params)
 		return FALSE;
@@ -180,10 +179,12 @@ ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_t *compat, ni_string_array_t *par
 
 		} else {
 			//This is the ip=<interface>:... case
-			if (!ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[1]))
-				return NI_CMDLINE_SYNTAX_INVALID;
-			else
-				return NI_CMDLINE_SYNTAX_SIMPLE_IFNAME;
+			if (!ni_cmdlineconfig_parse_opt_ip_method(compat, params->data[1])) {
+				rv = NI_CMDLINE_SYNTAX_INVALID;
+			} else {
+				ifname = params->data[0];
+				rv = NI_CMDLINE_SYNTAX_SIMPLE_IFNAME;
+			}
 		}
 	} else {
 		// FIXME: Finish this syntax implementation and check
@@ -198,31 +199,32 @@ ni_cmdlineconfig_parse_opt_ip(ni_compat_netdev_t *compat, ni_string_array_t *par
 			ni_tristate_set(&ipv6->conf, TRUE);
 		}
 		ni_address_new(addr.ss_family, prefixlen, &addr, &compat->dev->addrs);
+		ifname = params->data[5];
 		rv = NI_CMDLINE_SYNTAX_EXPLICIT_DNS;
 	}
 
+	// Add the name
+	compat->dev->name = xstrdup(ifname);
 	return rv;
 }
 
 ni_bool_t
-ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
+ni_cmdlineconfig_parse_vlan(ni_compat_netdev_t *compat, ni_string_array_t *params)
 {
 	ni_vlan_t *vlan;
 	const char *ifname;
 	const char *etherdev;
 	const char *vlantag;
-	ni_compat_netdev_t *compat;
 	unsigned int tag = 0;
 	size_t len;
 
-	//Test crap, remove
+	//FIXME: Test crap, remove
 	ni_ipv4_devinfo_t *ipv4;
 	ni_ipv6_devinfo_t *ipv6;
-	ni_ifworker_control_t *control;
 
 	if (params->count != 2) {
 		ni_error("Wrong number of params for vlan specification!");
-		goto error;
+		return FALSE;
 	}
 
 	ifname = params->data[0];
@@ -230,26 +232,25 @@ ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *par
 
 	if (ifname && !ni_netdev_name_is_valid(ifname)) {
 		ni_error("Rejecting suspect interface name: %s", ifname);
-		goto error;
+		return FALSE;
 	}
 
-	compat = ni_compat_netdev_new(ifname);
 	compat->dev->link.type = NI_IFTYPE_VLAN;
 	vlan = ni_netdev_get_vlan(compat->dev);
 
-	if (!strcmp(compat->dev->name, etherdev)) {
+	if (!strcmp(ifname, etherdev)) {
 		ni_error("ifcfg-%s: ETHERDEVICE=\"%s\" self-reference",
-			compat->dev->name, etherdev);
-		goto error;
+			ifname, etherdev);
+		return FALSE;
 	}
 
-	if ((vlantag = strrchr(compat->dev->name, '.')) != NULL) {
+	if ((vlantag = strrchr(ifname, '.')) != NULL) {
 		/* name.<TAG> */
 		++vlantag;
 	} else {
 		/* name<TAG> */
-		len = strlen(compat->dev->name);
-		vlantag = &compat->dev->name[len];
+		len = strlen(ifname);
+		vlantag = &ifname[len];
 		while(len > 0 && isdigit((unsigned char)vlantag[-1]))
 			vlantag--;
 	}
@@ -257,7 +258,7 @@ ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *par
 	if (ni_parse_uint(vlantag, &tag, 10) < 0) {
 		ni_error("ifcfg-%s: Cannot parse vlan-tag from interface name",
 			compat->dev->name);
-		goto error;
+		return FALSE;
 	}
 	vlan->protocol = NI_VLAN_PROTOCOL_8021Q;
 	vlan->tag = tag;
@@ -265,27 +266,13 @@ ni_cmdlineconfig_parse_vlan(ni_compat_netdev_array_t *nd, ni_string_array_t *par
 	ipv4 = ni_netdev_get_ipv4(compat->dev);
 	ni_tristate_set(&ipv4->conf, FALSE);
 	ni_tristate_set(&ipv4->conf.arp_verify, FALSE);
-
-	//Crap, remove
-	control = ni_ifworker_control_new();
-	control->link_timeout = 0;
-	compat->control = control;
-	compat->firewall.enabled = TRUE;	// FIXME: Does this make sense?
+	ipv6 = ni_netdev_get_ipv6(compat->dev);
+	ni_tristate_set(&ipv6->conf, FALSE);
 
 	// Add the name
 	compat->dev->name = xstrdup(ifname);
 
-	ni_compat_netdev_array_append(nd, compat);
-
-	//ni_compat_netdev_set_origin(compat, "dracut:cmdline", filename);
-
 	return TRUE;
-error:
-	//FIXME: Check throughout cmdline.c if we need this somewhere else (HINT: YES WE DO)
-	if (compat)	// the check is probably done inside this anyway
-		ni_compat_netdev_free(compat);
-
-	return FALSE;
 }
 ni_bool_t
 ni_cmdlineconfig_parse_team(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
@@ -302,7 +289,7 @@ ni_cmdlineconfig_parse_bond(ni_compat_netdev_array_t *nd, ni_string_array_t *par
 }
 
 ni_bool_t
-ni_cmdlineconfig_parse_bridge(ni_compat_netdev_array_t *nd, ni_string_array_t *params)
+ni_cmdlineconfig_parse_bridge(ni_compat_netdev_t *compat, ni_string_array_t *params)
 {
 	//FIXME: Implement this
 	return TRUE;
@@ -321,11 +308,11 @@ ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *nam
 
 
 	if (!strcmp(name, "ip")) {
-		compat = ni_cmdlineconfig_new_compat_netdev(params->data[0], filename);
+		compat = ni_cmdlineconfig_new_compat_netdev(filename);
 		if (!compat || !ni_cmdlineconfig_parse_opt_ip(compat, params, filename))
 			goto cleanup;
 
-		ni_cmdlineconfig_append_compat_netdev(nd, compat, NULL);
+		ni_cmdlineconfig_append_compat_netdev(nd, compat);
 	} else if (!strcmp(name, "root")) {
 		return TRUE;
 	} else if (!strcmp(name, "ifname")) {
@@ -343,23 +330,28 @@ ni_cmdlineconfig_parse_cmdline_var(ni_compat_netdev_array_t *nd, const char *nam
 	} else if (!strcmp(name, "rd.peerdns")) {
 		return TRUE;
 	} else if (!strcmp(name, "vlan")) {
-		//compat = ni_compat_netdev_new(params->data[0]);
-		compat = ni_cmdlineconfig_new_compat_netdev(params->data[0], filename);
-		if (!compat || !ni_cmdlineconfig_parse_vlan(nd, params))
+		compat = ni_cmdlineconfig_new_compat_netdev(filename);
+		if (!compat || !ni_cmdlineconfig_parse_vlan(compat, params))
 			goto cleanup;
 
+		ni_cmdlineconfig_append_compat_netdev(nd, compat);
 	} else if (!strcmp(name, "bond")) {
 		ni_cmdlineconfig_parse_bond(nd, params);
 	} else if (!strcmp(name, "team")) {
 		ni_cmdlineconfig_parse_team(nd, params);
 	} else if (!strcmp(name, "bridge")) {
-		ni_cmdlineconfig_parse_bridge(nd, params);
+		compat = ni_cmdlineconfig_new_compat_netdev(filename);
+		if (!compat || !ni_cmdlineconfig_parse_bridge(compat, params))
+			goto cleanup;
+
+		ni_cmdlineconfig_append_compat_netdev(nd, compat);
 	}
 
 	return TRUE;
 
 cleanup:
 	ni_compat_netdev_free(compat);
+	return FALSE;
 }
 
 /**

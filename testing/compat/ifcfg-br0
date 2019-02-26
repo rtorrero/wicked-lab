@@ -1,0 +1,4 @@
+STARTMODE=auto
+BOOTPROTO=dhcp
+BRIDGE='yes'
+BRIDGE_PORTS='eth0'
